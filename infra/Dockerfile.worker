@@ -1,0 +1,10 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+COPY pyproject.toml ruff.toml mypy.ini README.md /app/
+COPY packages /app/packages
+COPY apps/worker /app/apps/worker
+
+RUN pip install --no-cache-dir -e ".[dev]"
+
+CMD ["celery", "-A", "apps.worker.main.celery_app", "worker", "--loglevel=INFO"]

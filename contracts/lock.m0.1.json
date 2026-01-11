@@ -1,0 +1,18 @@
+{
+  "contract": {
+    "openapi": {
+      "version": "0.1.2",
+      "path": "openapi/openapi.v0.1.2.yaml",
+      "sha256": "cd6a8f29275df29416ab8dfb46d6dc066449252b316611508c02b220381ea6d2"
+    },
+    "db_schema": {
+      "alembic_head_revision": null,
+      "alembic_file": null
+    },
+    "policy": {
+      "breaking_changes": "FORBIDDEN",
+      "requires_ra003_entry": true,
+      "requires_lock_update": true
+    }
+  }
+}

@@ -1,0 +1,461 @@
+openapi: 3.0.3
+info:
+  title: AI Image App API
+  version: 0.1.2
+  description: MVP v0.1 (U1 Generate) — Intent-first, reproducible runs, read-only audit feed.
+servers:
+  - url: http://localhost:8000
+paths:
+  /intent:
+    post:
+      summary: Create and normalize an intent (IM-1)
+      operationId: createIntent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntentCreateRequest'
+      responses:
+        '201':
+          description: Intent created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntentCreateResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/PolicyBlocked'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /run:
+    post:
+      summary: Create a run from an intent and enqueue execution
+      operationId: createRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunCreateRequest'
+      responses:
+        '201':
+          description: Run created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunCreateResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /run/{run_id}:
+    get:
+      summary: Get run status and latest outputs
+      operationId: getRun
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Run state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunGetResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /run/{run_id}/events:
+    get:
+      summary: Read-only audit feed (append-only events)
+      operationId: getRunEvents
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+        - name: since_ts
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Return events with ts >= since_ts
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 200
+      responses:
+        '200':
+          description: Event list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunEventsResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /run/{run_id}/explain:
+    get:
+      summary: Audit-safe explanation of what happened and why
+      operationId: getRunExplain
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Explain payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunExplainResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /asset/{asset_id}:
+    get:
+      summary: Download/stream an asset
+      operationId: getAsset
+      parameters:
+        - $ref: '#/components/parameters/AssetId'
+      responses:
+        '200':
+          description: Asset binary
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: Asset expired (temp TTL)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  parameters:
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Run identifier (e.g., run_789)
+    AssetId:
+      name: asset_id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Asset identifier (e.g., as_001)
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    PolicyBlocked:
+      description: Request blocked by policy
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    IntentCreateRequest:
+      type: object
+      required: [project_id, task_type, intent_text, aspect_ratio, resolution]
+      properties:
+        project_id:
+          type: string
+        task_type:
+          type: string
+          enum: [generate]
+        intent_text:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        style_tags:
+          type: array
+          items:
+            type: string
+          default: []
+        aspect_ratio:
+          type: string
+          enum: ["1:1", "4:3", "3:4", "16:9", "9:16"]
+        resolution:
+          type: string
+          enum: ["512x512", "768x768", "1024x1024", "1024x576", "576x1024"]
+        seed:
+          type: integer
+          minimum: 0
+          maximum: 2147483647
+          nullable: true
+        policy_level:
+          type: string
+          enum: [standard, strict]
+          default: standard
+
+    IntentCreateResponse:
+      type: object
+      required: [intent_id, intent_spec]
+      properties:
+        intent_id:
+          type: string
+        intent_spec:
+          $ref: '#/components/schemas/IntentSpec'
+
+    IntentSpec:
+      type: object
+      required: [task_type, intent_text, constraints, safety]
+      properties:
+        task_type:
+          type: string
+          enum: [generate]
+        intent_text:
+          type: string
+        constraints:
+          $ref: '#/components/schemas/Constraints'
+        safety:
+          $ref: '#/components/schemas/SafetySpec'
+        seed:
+          type: integer
+          nullable: true
+
+    Constraints:
+      type: object
+      required: [aspect_ratio, resolution]
+      properties:
+        aspect_ratio:
+          type: string
+        resolution:
+          type: string
+
+    SafetySpec:
+      type: object
+      required: [policy_level]
+      properties:
+        policy_level:
+          type: string
+          enum: [standard, strict]
+
+    RunCreateRequest:
+      type: object
+      required: [intent_id]
+      properties:
+        intent_id:
+          type: string
+        mode:
+          type: string
+          enum: [fast, boost, deep]
+          default: boost
+        policy_profile:
+          type: string
+          enum: [production, growth, frontier]
+          default: production
+
+    RunCreateResponse:
+      type: object
+      required: [run_id, status, links, orchestration_plan]
+      properties:
+        run_id:
+          type: string
+        status:
+          type: string
+          enum: [queued]
+        orchestration_plan:
+          $ref: '#/components/schemas/OrchestrationPlan'
+        links:
+          $ref: '#/components/schemas/RunLinks'
+
+    RunGetResponse:
+      type: object
+      required: [run_id, status, links]
+      properties:
+        run_id:
+          type: string
+        status:
+          type: string
+          enum: [queued, running, succeeded, failed]
+        latest_temp_asset_id:
+          type: string
+          nullable: true
+        assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetRef'
+          default: []
+        error:
+          $ref: '#/components/schemas/ErrorBody'
+        links:
+          $ref: '#/components/schemas/RunLinks'
+
+    RunLinks:
+      type: object
+      required: [events, explain]
+      properties:
+        events:
+          type: string
+        explain:
+          type: string
+
+    AssetRef:
+      type: object
+      required: [asset_id, type, url]
+      properties:
+        asset_id:
+          type: string
+        type:
+          type: string
+          enum: [image]
+        url:
+          type: string
+
+    OrchestrationPlan:
+      type: object
+      required: [policy_profile, modules, time_budget_ms]
+      properties:
+        policy_profile:
+          type: string
+          enum: [production, growth, frontier]
+        modules:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModuleDecision'
+        time_budget_ms:
+          type: integer
+          minimum: 1000
+          maximum: 600000
+        qi_profile:
+          type: string
+          enum: [lite, standard, frontier]
+          nullable: true
+
+    ModuleDecision:
+      type: object
+      required: [name, action]
+      properties:
+        name:
+          type: string
+          description: Module name (e.g., MF-6, FG-1, FM-1, RA-016, QI-01)
+        action:
+          type: string
+          enum: [ACTIVATE, BYPASS]
+        reason:
+          type: string
+          nullable: true
+
+    RunEventsResponse:
+      type: object
+      required: [run_id, events]
+      properties:
+        run_id:
+          type: string
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditEvent'
+
+    AuditEvent:
+      type: object
+      required:
+        - event
+        - ts
+        - run_id
+        - run_mode
+        - novelty_tier
+        - feasibility_status
+      properties:
+        event:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        run_id:
+          type: string
+        run_mode:
+          type: string
+          enum: [fast, boost, deep]
+        novelty_tier:
+          type: string
+          enum: [N_LOW, N_MED, N_HIGH]
+        feasibility_status:
+          type: string
+          enum: [proceed, proceed_with_guards, revise, blocked]
+        frontier_target:
+          type: string
+          nullable: true
+        payload:
+          type: object
+          additionalProperties: true
+
+    RunExplainResponse:
+      type: object
+      required: [run_id, summary, constraints, policy]
+      properties:
+        run_id:
+          type: string
+        summary:
+          type: string
+        constraints:
+          type: array
+          items:
+            type: string
+        policy:
+          $ref: '#/components/schemas/SafetySpec'
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorBody'
+
+    ErrorBody:
+      type: object
+      required: [code, message, request_id]
+      properties:
+        code:
+          type: string
+          enum:
+            - INTENT_INVALID
+            - POLICY_BLOCKED
+            - RUN_NOT_FOUND
+            - ASSET_NOT_FOUND
+            - ASSET_EXPIRED
+            - STORAGE_ERROR
+            - INTERNAL
+        message:
+          type: string
+        request_id:
+          type: string
